@@ -28,6 +28,8 @@ final class RemoteController: ObservableObject {
     private var holdTimer: Timer?
     private var suppressMovementUntil: TimeInterval = 0
     private var lastMoveTime: TimeInterval?
+    /// Smoothed finger speed (surface widths per second), so the slow-speed damping doesn't jitter frame to frame.
+    private var smoothedSpeed: Double?
     private var cancellables: Set<AnyCancellable> = []
     /// The clickpad region that was under the finger when the clickpad went down.
     private var clickpadHeld: RemoteButton?
@@ -45,6 +47,16 @@ final class RemoteController: ObservableObject {
     private static let pointsPerSurfaceWidth = 900.0
     /// Base scroll distance, in pixels, for one full circle.
     private static let pixelsPerRevolution = 1000.0
+    /// Very slow finger movement is scaled down to this fraction of the base gain, for precise pointing.
+    private static let slowSpeedGain = 0.3
+    /// Speed (surface widths per second) at and above which slow-speed damping no longer applies.
+    private static let slowSpeedLimit = 0.5
+
+    /// Gain multiplier that eases from `slowSpeedGain` when barely moving up to 1 at `slowSpeedLimit`.
+    private static func precisionFactor(speed: Double) -> Double {
+        let t = min(max(speed / slowSpeedLimit, 0), 1)
+        return slowSpeedGain + (1 - slowSpeedGain) * t * t * (3 - 2 * t)
+    }
 
     init(batteryHistory: BatteryHistoryStore? = nil) {
         settings = .shared
@@ -290,7 +302,9 @@ final class RemoteController: ObservableObject {
         }
         let phaseBefore = recognizer.phase
         handleGesture(recognizer.process(samples, at: time), at: time)
-        if phaseBefore == .pending, recognizer.phase == .moving {
+        if phaseBefore == .pending, recognizer.phase == .moving, let point, !SiriRemoteHID.isOnClickpadRing(x: point.x, y: point.y) {
+            log.add(.info, .touch, "Finger is in the centre of the clickpad, so this touch moves the pointer. Rest on the outer ring to scroll.")
+        } else if phaseBefore == .pending, recognizer.phase == .moving {
             log.add(.info, .touch, String(
                 format: "Finger moved after %.2f s, before the %.2f s hold, so this touch moves the pointer. Rest still a moment longer to scroll.",
                 time - touchStartTime, recognizer.configuration.holdDuration
@@ -324,6 +338,7 @@ final class RemoteController: ObservableObject {
             switch output {
             case .touchBegan:
                 lastMoveTime = nil
+                smoothedSpeed = nil
                 touchMoved = .zero
                 touchScrolled = 0
 
@@ -339,7 +354,11 @@ final class RemoteController: ObservableObject {
                 let dt = lastMoveTime.map { max(time - $0, 0.004) } ?? 0.016
                 lastMoveTime = time
                 let speed = hypot(dx, dy) / dt // surface widths per second
-                let gain = Self.pointsPerSurfaceWidth * settings.cursorSpeed * (1 + settings.cursorAcceleration * min(speed, 4) * 0.6)
+                let smoothed = smoothedSpeed.map { $0 * 0.6 + speed * 0.4 } ?? speed
+                smoothedSpeed = smoothed
+                let gain = Self.pointsPerSurfaceWidth * settings.cursorSpeed
+                    * Self.precisionFactor(speed: smoothed)
+                    * (1 + settings.cursorAcceleration * min(speed, 4) * 0.6)
                 // Surface y points up; screen y points down.
                 synth.moveCursor(dx: dx * gain, dy: -dy * gain)
                 touchMoved.dx += dx * gain

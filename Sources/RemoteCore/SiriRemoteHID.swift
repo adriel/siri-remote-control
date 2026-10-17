@@ -62,9 +62,16 @@ public enum SiriRemoteHID {
     public static func clickpadButton(x: Double, y: Double) -> RemoteButton {
         let dx = x - 0.5
         let dy = y - 0.5
-        if (dx * dx + dy * dy).squareRoot() < clickpadCentreRadius { return .select }
+        if !isOnClickpadRing(x: x, y: y) { return .select }
         if abs(dx) > abs(dy) { return dx > 0 ? .right : .left }
         return dy > 0 ? .up : .down
+    }
+
+    /// True outside the centre circle, on the ring where the four directions sit.
+    public static func isOnClickpadRing(x: Double, y: Double) -> Bool {
+        let dx = x - 0.5
+        let dy = y - 0.5
+        return (dx * dx + dy * dy).squareRoot() >= clickpadCentreRadius
     }
 
     /// A consumer-control interface counts as a remote if it has the four clickpad directions.

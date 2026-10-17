@@ -49,7 +49,7 @@ struct GeneralTab: View {
             } header: {
                 Text("Trackpad mode: scrolling")
             } footer: {
-                Text("Rest your finger on the clickpad without moving it, then draw circles. Clockwise scrolls down, anticlockwise scrolls up. Lift your finger to stop.")
+                Text("Rest your finger on the outer ring of the clickpad without moving it, then draw circles. Resting in the centre just moves the pointer. Clockwise scrolls down, anticlockwise scrolls up. Lift your finger to stop.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

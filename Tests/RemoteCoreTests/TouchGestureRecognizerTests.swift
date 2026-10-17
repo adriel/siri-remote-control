@@ -24,9 +24,9 @@ final class TouchGestureRecognizerTests: XCTestCase {
 
     func testSettlingDriftStillAllowsHold() {
         let r = TouchGestureRecognizer()
-        _ = r.process(touch(0.5, 0.5), at: 0)
-        _ = r.process(touch(0.55, 0.52), at: 0.05)  // fingertip settling: moves the pointer but doesn't rule out a hold
-        _ = r.process(touch(0.56, 0.52), at: 0.2)
+        _ = r.process(touch(0.5, 0.8), at: 0)
+        _ = r.process(touch(0.55, 0.82), at: 0.05)  // fingertip settling: moves the pointer but doesn't rule out a hold
+        _ = r.process(touch(0.56, 0.82), at: 0.2)
         XCTAssertEqual(r.phase, .pending)
         XCTAssertEqual(r.tick(at: 0.4), [.scrollArmed])
     }
@@ -50,7 +50,7 @@ final class TouchGestureRecognizerTests: XCTestCase {
 
     func testHoldArmsScrollViaTick() {
         let r = TouchGestureRecognizer()
-        _ = r.process(touch(0.5, 0.5), at: 0)
+        _ = r.process(touch(0.5, 0.15), at: 0)
         XCTAssertEqual(r.tick(at: 0.2), [])
         XCTAssertEqual(r.tick(at: 0.4), [.scrollArmed])
         XCTAssertEqual(r.phase, .scrolling)
@@ -85,7 +85,7 @@ final class TouchGestureRecognizerTests: XCTestCase {
     }
 
     func testSmallOffCentreCircleStillScrolls() {
-        XCTAssertLessThan(circleRotation(clockwise: true, radius: 0.08, center: (0.3, 0.7)), -2 * .pi * 0.7)
+        XCTAssertLessThan(circleRotation(clockwise: true, radius: 0.08, center: (0.2, 0.7)), -2 * .pi * 0.7)
     }
 
     func testStraightLineAfterHoldDoesNotScroll() {
@@ -103,15 +103,32 @@ final class TouchGestureRecognizerTests: XCTestCase {
         // The remote may send no frames for a still finger. The first frame after the hold
         // window must arm scrolling even if it has already moved.
         let r = TouchGestureRecognizer()
-        _ = r.process(touch(0.5, 0.5), at: 0)
-        let out = r.process(touch(0.6, 0.5), at: 0.5)
+        _ = r.process(touch(0.85, 0.5), at: 0)
+        let out = r.process(touch(0.85, 0.6), at: 0.5)
         XCTAssertEqual(out.first, .scrollArmed)
         XCTAssertEqual(r.phase, .scrolling)
     }
 
-    func testClickCancelsHold() {
+    func testHoldInCentreDoesNotScroll() {
+        let r = TouchGestureRecognizer()
+        _ = r.process(touch(0.55, 0.5), at: 0)
+        XCTAssertEqual(r.tick(at: 0.05), [])
+        XCTAssertEqual(r.phase, .pending)  // still settling: the finger may be heading for the ring
+        XCTAssertEqual(r.tick(at: 0.5), [])
+        XCTAssertEqual(r.phase, .moving)
+    }
+
+    func testFirstMovementAfterSilentCentreHoldMovesPointer() {
         let r = TouchGestureRecognizer()
         _ = r.process(touch(0.5, 0.5), at: 0)
+        let out = r.process(touch(0.52, 0.5), at: 0.5)
+        guard case .move? = out.first else { return XCTFail("expected move, got \(out)") }
+        XCTAssertEqual(r.phase, .moving)
+    }
+
+    func testClickCancelsHold() {
+        let r = TouchGestureRecognizer()
+        _ = r.process(touch(0.5, 0.85), at: 0)
         r.cancelHold()
         XCTAssertEqual(r.phase, .moving)
         XCTAssertEqual(r.tick(at: 1), [])

@@ -23,7 +23,7 @@ A small macOS menu bar app that turns the Siri Remote (2nd generation and later,
 | Power | Sleep display |
 | Siri (side button) | Switch between remote and trackpad mode |
 
-**Trackpad mode**: slide on the clickpad to move the pointer. Press the clickpad to left-click (press and slide to drag). Back is a right-click. To scroll, rest your finger still for a moment, then draw circles: clockwise scrolls down, anticlockwise scrolls up. The other buttons keep their remote-mode actions.
+**Trackpad mode**: slide on the clickpad to move the pointer; very slow movement is scaled down for precise pointing. Press the clickpad to left-click (press and slide to drag). Back is a right-click. To scroll, rest your finger still on the outer ring of the clickpad for a moment, then draw circles: clockwise scrolls down, anticlockwise scrolls up. The other buttons keep their remote-mode actions.
 
 You can remap every button in both modes from **Settings → Buttons**.
 
