@@ -28,9 +28,10 @@ public enum GestureOutput: Equatable, Sendable {
 
 /// Turns raw touch frames into cursor movement and "hold, then circle" scrolling.
 ///
-/// The pointer moves from the first frame. Meanwhile a touch starts out *pending*: if the finger then
-/// stays within `holdTolerance` of where it settled until `holdDuration`, scrolling arms and the pointer
-/// stops. Moving further away first makes it a plain pointer move. Once armed, scrolling follows how much
+/// The pointer moves from the first frame. Meanwhile a touch starts out *pending*: if the finger settles on
+/// the clickpad's outer ring and stays within `holdTolerance` of that point until `holdDuration`, scrolling
+/// arms and the pointer stops. Moving further away first, or settling in the centre circle, makes it a plain
+/// pointer move. Once armed, scrolling follows how much
 /// the finger's direction of travel turns. A full circle is ±2π however big it is and wherever it is drawn
 /// on the surface, which is how click-wheel scrolling works.
 public final class TouchGestureRecognizer {
@@ -44,6 +45,9 @@ public final class TouchGestureRecognizer {
         public var settleDuration: TimeInterval = 0.1
         /// After settling, moving further than this from the settled point rules out a hold (~5% of the surface).
         public var holdTolerance: Double = 0.05
+        /// A hold only counts when the finger settles at least this far from the middle of the surface
+        /// (out on the ring). Resting in the centre never scrolls, so slow pointing there isn't interrupted.
+        public var holdMinRadius: Double = SiriRemoteHID.clickpadCentreRadius
         /// Minimum path segment used to measure direction. Filters sensor noise.
         public var scrollSegment: Double = 0.012
         /// Direction changes larger than this between segments are treated as noise.
@@ -92,7 +96,7 @@ public final class TouchGestureRecognizer {
 
         switch phase {
         case .pending:
-            if time - startTime >= configuration.holdDuration {
+            if time - startTime >= configuration.holdDuration, holdAllowed(at: holdAnchor) {
                 // Checked first so the first movement after a rest (in case the remote stops
                 // sending frames for a still finger) scrolls instead of moving the cursor.
                 armScroll(at: holdAnchor, into: &out)
@@ -102,7 +106,7 @@ public final class TouchGestureRecognizer {
                 out += moveStep(to: p)
                 if time - startTime < configuration.settleDuration {
                     holdAnchor = p
-                } else if p.distance(to: holdAnchor) > configuration.holdTolerance {
+                } else if !holdAllowed(at: holdAnchor) || p.distance(to: holdAnchor) > configuration.holdTolerance {
                     phase = .moving
                 }
             }
@@ -119,7 +123,12 @@ public final class TouchGestureRecognizer {
     /// Call periodically while `phase == .pending` so scrolling arms on time even if the remote
     /// stops sending frames for a stationary finger.
     public func tick(at time: TimeInterval) -> [GestureOutput] {
-        guard phase == .pending, time - startTime >= configuration.holdDuration else { return [] }
+        guard phase == .pending, time - startTime >= configuration.settleDuration else { return [] }
+        guard holdAllowed(at: holdAnchor) else {
+            phase = .moving
+            return []
+        }
+        guard time - startTime >= configuration.holdDuration else { return [] }
         var out: [GestureOutput] = []
         armScroll(at: lastPoint, into: &out)
         return out
@@ -142,6 +151,10 @@ public final class TouchGestureRecognizer {
         lastSegment = nil
         phase = .idle
         return [.touchEnded(wasScrolling: wasScrolling)]
+    }
+
+    private func holdAllowed(at p: Point) -> Bool {
+        p.distance(to: Point(x: 0.5, y: 0.5)) >= configuration.holdMinRadius
     }
 
     private func moveStep(to p: Point) -> [GestureOutput] {
