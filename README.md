@@ -2,6 +2,10 @@
 
 A small macOS menu bar app that turns the Siri Remote (2nd generation and later, the aluminium one with the clickpad) into a Mac remote and trackpad, along the lines of Remote Buddy.
 
+<p align="center">
+  <img src="docs/screenshots/buttons.png" width="780" alt="The Buttons settings tab: a picture of the Siri Remote next to the action mapped to each button">
+</p>
+
 ## What it does
 
 **Remote mode** (default mapping)
@@ -29,6 +33,27 @@ Also:
 - **Battery**: shows the remote's charge, sends a notification when it falls to your chosen level (default 20%), and keeps a history. Pick Past Week or Past Month to see a level chart (hover for exact readings), your average daily use with an estimate of how long the charge will last, and one section per day with % used, start and end level, charging, a 24-hour chart and the individual readings. A reading is saved whenever the level changes, and every 30 minutes otherwise. History lives in `~/Library/Application Support/com.runaroundhome.RemoteControl/battery-history.json` and is kept for 35 days.
 - **Pairing**: lists remotes this Mac has seen, unpairs them, and walks you through pairing a new one.
 - **Diagnostics**: shows why a button might not be working. It covers permissions, apps holding the remote (such as Remote Buddy), Secure Input, other apps filtering events, and whether the remote is asleep. It has a live picture of the remote that lights up as you press, plus an event log of each press and what it did.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/general.png" alt="General tab: on/off, mode, launch at login, and trackpad cursor and scrolling settings"></td>
+    <td width="50%"><img src="docs/screenshots/battery.png" alt="Battery tab: low-battery alert and a week of battery history with average daily use"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>General</b>: mode, behaviour, and trackpad cursor and scrolling</td>
+    <td align="center"><b>Battery</b>: low-battery alert and charge history</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/pairing.png" alt="Pairing tab: paired remotes and steps for pairing a new one"></td>
+    <td width="50%" align="center"><img src="docs/screenshots/diagram.png" width="300" alt="The live remote picture from Diagnostics, lighting up pressed buttons and the touch position"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Pairing</b>: see, unpair and pair remotes</td>
+    <td align="center"><b>Diagnostics</b>: the live remote picture lights up as you press and touch</td>
+  </tr>
+</table>
 
 ## Build and install
 
@@ -76,4 +101,5 @@ Tests/RemoteCoreTests   swift test
 scripts/build-app.sh    builds, bundles, signs (and optionally installs) the .app
 ```
 
-Run the tests with `swift test`. To render each settings tab to PNGs without starting input, run `"build/Remote Control.app/Contents/MacOS/RemoteControl" --snapshot <dir>`.
+Run the tests with `swift test`. To render each settings tab to PNGs without starting input, run `"build/Remote Control.app/Contents/MacOS/RemoteControl" --snapshot <dir>`. The screenshots in `docs/screenshots` come from this, with Battery and Pairing cropped to the top of the window.
+
