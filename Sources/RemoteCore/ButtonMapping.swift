@@ -32,8 +32,9 @@ public struct ButtonMapping: Codable, Equatable, Sendable {
         .select: RemoteAction(.playPause),
         .back: .key(KeyCatalog.leftArrow),
         .tv: .key(KeyCatalog.rightArrow),
-        .playPause: RemoteAction(.playPause),
-        .mute: RemoteAction(.mute),
+        // Quarter-step brightness, the same as pressing ⇧⌥ with the brightness keys.
+        .playPause: RemoteAction(.brightnessUpFine),
+        .mute: RemoteAction(.brightnessDownFine),
         // Quarter-step volume, the same as pressing ⇧⌥ with the volume keys.
         .volumeUp: RemoteAction(.volumeUpFine),
         .volumeDown: RemoteAction(.volumeDownFine),
@@ -53,7 +54,7 @@ public struct ButtonMapping: Codable, Equatable, Sendable {
     public static let defaults = ButtonMapping(remote: defaultRemote, trackpad: defaultTrackpad)
 
     /// Bump when defaults change in a way saved mappings should pick up.
-    public static let currentVersion = 2
+    public static let currentVersion = 3
 
     /// Brings a mapping saved by an older version up to date, leaving anything the user customised alone.
     public mutating func migrate(from version: Int) {
@@ -64,6 +65,17 @@ public struct ButtonMapping: Codable, Equatable, Sendable {
                 let new = RemoteAction(button == .volumeUp ? .volumeUpFine : .volumeDownFine)
                 if remote[button] == old { remote[button] = new }
                 if trackpad[button] == old { trackpad[button] = new }
+            }
+        }
+        if version < 3 {
+            // v3: Play/Pause and Mute default to fine brightness up/down.
+            let changes: [(RemoteButton, ActionKind, ActionKind)] = [
+                (.playPause, .playPause, .brightnessUpFine),
+                (.mute, .mute, .brightnessDownFine),
+            ]
+            for (button, old, new) in changes {
+                if remote[button] == RemoteAction(old) { remote[button] = RemoteAction(new) }
+                if trackpad[button] == RemoteAction(old) { trackpad[button] = RemoteAction(new) }
             }
         }
     }

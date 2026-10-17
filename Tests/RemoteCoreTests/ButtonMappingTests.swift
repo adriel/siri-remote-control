@@ -15,6 +15,20 @@ final class ButtonMappingTests: XCTestCase {
         XCTAssertEqual(m.action(for: .volumeUp, in: .remote).kind, .volumeUpFine)
         XCTAssertEqual(m.action(for: .volumeDown, in: .remote).kind, .volumeDownFine)
         XCTAssertEqual(m.action(for: .volumeUp, in: .trackpad).kind, .volumeUpFine)
+        XCTAssertEqual(m.action(for: .playPause, in: .remote).kind, .brightnessUpFine)
+        XCTAssertEqual(m.action(for: .mute, in: .remote).kind, .brightnessDownFine)
+        XCTAssertEqual(m.action(for: .select, in: .remote).kind, .playPause)
+    }
+
+    func testMigrationMovesPlayPauseAndMuteToBrightness() {
+        var m = ButtonMapping.defaults
+        m.remote[.playPause] = RemoteAction(.playPause)
+        m.remote[.mute] = RemoteAction(.mute)
+        m.trackpad[.mute] = RemoteAction(.lockScreen)  // customised: must survive
+        m.migrate(from: 2)
+        XCTAssertEqual(m.remote[.playPause]?.kind, .brightnessUpFine)
+        XCTAssertEqual(m.remote[.mute]?.kind, .brightnessDownFine)
+        XCTAssertEqual(m.trackpad[.mute]?.kind, .lockScreen)
     }
 
     func testMigrationMovesOldVolumeDefaultsToFine() {
@@ -42,7 +56,8 @@ final class ButtonMappingTests: XCTestCase {
         }
         XCTAssertEqual(m.action(for: .back, in: .trackpad).kind, .rightClick)
         XCTAssertEqual(m.action(for: .siri, in: .trackpad).kind, .toggleMode)
-        XCTAssertEqual(m.action(for: .playPause, in: .trackpad).kind, .playPause)
+        XCTAssertEqual(m.action(for: .playPause, in: .trackpad).kind, .brightnessUpFine)
+        XCTAssertEqual(m.action(for: .mute, in: .trackpad).kind, .brightnessDownFine)
     }
 
     func testCodableRoundTripUsesButtonNamesAsKeys() throws {

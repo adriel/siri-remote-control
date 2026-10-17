@@ -14,6 +14,8 @@ final class ActionPerformer {
     }
 
     let synth: EventSynthesizer
+    /// Whether macOS acts on our synthetic brightness keys. Learned on first use; if not, brightness is set directly.
+    private var brightnessKeyWorks: Bool?
 
     init(synth: EventSynthesizer) {
         self.synth = synth
@@ -40,8 +42,10 @@ final class ActionPerformer {
         case .previousTrack: return media(.previous, phase)
         case .fastForward: return media(.fast, phase)
         case .rewind: return media(.rewind, phase)
-        case .brightnessUp: return media(.brightnessUp, phase)
-        case .brightnessDown: return media(.brightnessDown, phase)
+        case .brightnessUp: return brightness(up: true, fine: false, phase)
+        case .brightnessDown: return brightness(up: false, fine: false, phase)
+        case .brightnessUpFine: return brightness(up: true, fine: true, phase)
+        case .brightnessDownFine: return brightness(up: false, fine: true, phase)
 
         case .keyboardShortcut:
             guard let shortcut = action.shortcut else {
@@ -89,6 +93,37 @@ final class ActionPerformer {
             return Outcome(status: .done, detail: "media key sent to the Now Playing app")
         }
         return Outcome(status: .done, detail: "media key sent")
+    }
+
+    /// Sends the brightness key (with ⇧⌥ for quarter steps) so macOS shows its own indicator. The first time,
+    /// checks the built-in display actually changed; if macOS ignored the key, steps the display directly from then on.
+    private func brightness(up: Bool, fine: Bool, _ phase: Phase) -> Outcome? {
+        guard phase != .release else { return nil }
+        let step: Float = (fine ? 1 / 64 : 1 / 16) * (up ? 1 : -1)
+
+        if brightnessKeyWorks == false, let current = DisplayBrightness.current {
+            let target = min(max(current + step, 0), 1)
+            DisplayBrightness.set(target)
+            return phase == .press ? Outcome(status: .done, detail: "set built-in display to \(Int((target * 100).rounded()))%") : nil
+        }
+
+        let before = DisplayBrightness.current
+        synth.mediaKey(up ? .brightnessUp : .brightnessDown, modifiers: fine ? [.shift, .option] : [])
+        if brightnessKeyWorks == nil, let before {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, self.brightnessKeyWorks == nil, let after = DisplayBrightness.current else { return }
+                if abs(after - before) > 0.001 {
+                    self.brightnessKeyWorks = true
+                    DiagnosticsLog.shared.add(.info, .action, "macOS handles the brightness key")
+                } else if up ? before < 0.999 : before > 0.001 {
+                    self.brightnessKeyWorks = false
+                    DisplayBrightness.set(min(max(before + step, 0), 1))
+                    DiagnosticsLog.shared.add(.warning, .action, "macOS ignored the synthetic brightness key, so the built-in display is now set directly (no on-screen indicator)")
+                }
+            }
+        }
+        guard phase == .press else { return nil }
+        return Outcome(status: .done, detail: fine ? "brightness key sent with ⇧⌥ (quarter step)" : "brightness key sent")
     }
 
     private func mouse(_ button: EventSynthesizer.MouseButton, _ phase: Phase) -> Outcome? {

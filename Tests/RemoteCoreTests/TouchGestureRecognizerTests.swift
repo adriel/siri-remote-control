@@ -6,19 +6,39 @@ final class TouchGestureRecognizerTests: XCTestCase {
         [TouchSample(id: id, x: x, y: y)]
     }
 
-    func testQuickMovementMovesCursor() {
+    func testPointerMovesFromTheFirstFrame() {
         let r = TouchGestureRecognizer()
         XCTAssertEqual(r.process(touch(0.5, 0.5), at: 0), [.touchBegan])
-        XCTAssertEqual(r.process(touch(0.52, 0.5), at: 0.02), [])  // inside hold tolerance
-        let out = r.process(touch(0.6, 0.55), at: 0.05)
-        XCTAssertEqual(r.phase, .moving)
-        guard case let .move(dx, dy)? = out.first else { return XCTFail("expected move, got \(out)") }
-        XCTAssertEqual(dx, 0.1, accuracy: 1e-9)  // measured from the touch-down point
-        XCTAssertEqual(dy, 0.05, accuracy: 1e-9)
+        // No dead zone: even a small first movement is reported straight away.
+        guard case let .move(dx, dy)? = r.process(touch(0.52, 0.5), at: 0.016).first else { return XCTFail("expected move") }
+        XCTAssertEqual(dx, 0.02, accuracy: 1e-9)
+        XCTAssertEqual(dy, 0, accuracy: 1e-9)
+        XCTAssertEqual(r.phase, .pending)  // could still become a hold
 
-        let next = r.process(touch(0.62, 0.55), at: 0.07)
-        guard case let .move(dx2, _)? = next.first else { return XCTFail("expected move") }
-        XCTAssertEqual(dx2, 0.02, accuracy: 1e-9)
+        guard case let .move(dx2, dy2)? = r.process(touch(0.6, 0.55), at: 0.15).first else { return XCTFail("expected move") }
+        XCTAssertEqual(dx2, 0.08, accuracy: 1e-9)
+        XCTAssertEqual(dy2, 0.05, accuracy: 1e-9)
+        XCTAssertEqual(r.phase, .moving)  // moved well away from where it settled: no hold now
+        XCTAssertEqual(r.tick(at: 1), [])
+    }
+
+    func testSettlingDriftStillAllowsHold() {
+        let r = TouchGestureRecognizer()
+        _ = r.process(touch(0.5, 0.5), at: 0)
+        _ = r.process(touch(0.55, 0.52), at: 0.05)  // fingertip settling: moves the pointer but doesn't rule out a hold
+        _ = r.process(touch(0.56, 0.52), at: 0.2)
+        XCTAssertEqual(r.phase, .pending)
+        XCTAssertEqual(r.tick(at: 0.4), [.scrollArmed])
+    }
+
+    func testSlowSmallMoveStillMovesPointer() {
+        let r = TouchGestureRecognizer()
+        _ = r.process(touch(0.5, 0.5), at: 0)
+        var moved = 0.0
+        for i in 1...10 {
+            for case let .move(dx, _) in r.process(touch(0.5 + Double(i) * 0.002, 0.5), at: Double(i) * 0.016) { moved += dx }
+        }
+        XCTAssertEqual(moved, 0.02, accuracy: 1e-9)
     }
 
     func testLiftEndsTouch() {

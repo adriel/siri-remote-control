@@ -28,10 +28,11 @@ public enum GestureOutput: Equatable, Sendable {
 
 /// Turns raw touch frames into cursor movement and "hold, then circle" scrolling.
 ///
-/// A touch starts out *pending*. Moving more than `holdTolerance` before `holdDuration` elapses
-/// makes it a cursor move. Resting still for `holdDuration` arms scrolling. After that, scrolling
-/// follows how much the finger's direction of travel turns. A full circle is ±2π however big it is
-/// and wherever it is drawn on the surface, which is how click-wheel scrolling works.
+/// The pointer moves from the first frame. Meanwhile a touch starts out *pending*: if the finger then
+/// stays within `holdTolerance` of where it settled until `holdDuration`, scrolling arms and the pointer
+/// stops. Moving further away first makes it a plain pointer move. Once armed, scrolling follows how much
+/// the finger's direction of travel turns. A full circle is ±2π however big it is and wherever it is drawn
+/// on the surface, which is how click-wheel scrolling works.
 public final class TouchGestureRecognizer {
     public enum Phase: String, Sendable {
         case idle, pending, moving, scrolling
@@ -39,7 +40,10 @@ public final class TouchGestureRecognizer {
 
     public struct Configuration: Sendable {
         public var holdDuration: TimeInterval = 0.35
-        public var holdTolerance: Double = 0.04
+        /// A fingertip settles onto the sensor for a moment after touch-down; drift then doesn't count against a hold.
+        public var settleDuration: TimeInterval = 0.1
+        /// After settling, moving further than this from the settled point rules out a hold (~5% of the surface).
+        public var holdTolerance: Double = 0.05
         /// Minimum path segment used to measure direction. Filters sensor noise.
         public var scrollSegment: Double = 0.012
         /// Direction changes larger than this between segments are treated as noise.
@@ -55,8 +59,9 @@ public final class TouchGestureRecognizer {
 
     private var trackedID: Int32?
     private var startTime: TimeInterval = 0
-    private var startPoint = Point()
     private var lastPoint = Point()
+    /// Where the finger settled; a hold must stay near it.
+    private var holdAnchor = Point()
     private var scrollAnchor = Point()
     private var lastSegment: Point?
 
@@ -72,8 +77,8 @@ public final class TouchGestureRecognizer {
             guard let first = active.min(by: { $0.id < $1.id }) else { return [] }
             self.trackedID = first.id
             startTime = time
-            startPoint = Point(first)
-            lastPoint = startPoint
+            lastPoint = Point(first)
+            holdAnchor = lastPoint
             phase = .pending
             return [.touchBegan]
         }
@@ -88,21 +93,21 @@ public final class TouchGestureRecognizer {
         switch phase {
         case .pending:
             if time - startTime >= configuration.holdDuration {
-                // Checked first so the first movement after a rest (when the remote may not
-                // send frames for a still finger) scrolls instead of moving the cursor.
-                armScroll(at: startPoint, into: &out)
+                // Checked first so the first movement after a rest (in case the remote stops
+                // sending frames for a still finger) scrolls instead of moving the cursor.
+                armScroll(at: holdAnchor, into: &out)
                 out += scrollStep(to: p)
-            } else if p.distance(to: startPoint) > configuration.holdTolerance {
-                phase = .moving
-                out.append(.move(dx: p.x - startPoint.x, dy: p.y - startPoint.y))
-                lastPoint = p
+            } else {
+                // No waiting: the pointer follows the finger while we watch for a hold.
+                out += moveStep(to: p)
+                if time - startTime < configuration.settleDuration {
+                    holdAnchor = p
+                } else if p.distance(to: holdAnchor) > configuration.holdTolerance {
+                    phase = .moving
+                }
             }
         case .moving:
-            let d = p - lastPoint
-            if d.length >= configuration.moveDeadband {
-                out.append(.move(dx: d.x, dy: d.y))
-                lastPoint = p
-            }
+            out += moveStep(to: p)
         case .scrolling:
             out += scrollStep(to: p)
         case .idle:
@@ -137,6 +142,13 @@ public final class TouchGestureRecognizer {
         lastSegment = nil
         phase = .idle
         return [.touchEnded(wasScrolling: wasScrolling)]
+    }
+
+    private func moveStep(to p: Point) -> [GestureOutput] {
+        let d = p - lastPoint
+        guard d.length >= configuration.moveDeadband else { return [] }
+        lastPoint = p
+        return [.move(dx: d.x, dy: d.y)]
     }
 
     private func armScroll(at point: Point, into out: inout [GestureOutput]) {

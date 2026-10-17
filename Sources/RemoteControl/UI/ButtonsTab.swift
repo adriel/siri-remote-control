@@ -5,8 +5,10 @@ struct ButtonsTab: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var controller: RemoteController
     @State private var mode: RemoteMode = .remote
-    /// The mapping row under the pointer; its button lights up on the remote drawing.
+    /// The button being pointed at, from either a mapping row or the remote drawing. Both light up.
     @State private var hovered: RemoteButton?
+    /// True when `hovered` came from the drawing, so the list scrolls its row into view.
+    @State private var hoverFromDiagram = false
 
     init(initialHover: RemoteButton? = nil) {
         _hovered = State(initialValue: initialHover)
@@ -25,37 +27,57 @@ struct ButtonsTab: View {
                 RemotePreview(
                     pressed: controller.pressedButtons,
                     hovered: hovered,
-                    action: hovered.map { settings.mapping.action(for: $0, in: mode) }
+                    action: hovered.map { settings.mapping.action(for: $0, in: mode) },
+                    onHover: { button, inside in
+                        if inside {
+                            hoverFromDiagram = true
+                            hovered = button
+                        } else if hovered == button {
+                            hovered = nil
+                        }
+                    }
                 )
                 .frame(width: 168)
                 .padding(.top, 18)
 
-                Form {
-                    Section {
-                        ForEach(RemoteButton.allCases) { button in
-                            ButtonMappingRow(
-                                button: button,
-                                action: binding(for: button),
-                                isPressed: controller.pressedButtons.contains(button),
-                                isHovered: hovered == button
-                            )
-                            .onHover { inside in
-                                // Moving between rows can report the new row before the old one leaves.
-                                if inside { hovered = button } else if hovered == button { hovered = nil }
+                ScrollViewReader { proxy in
+                    Form {
+                        Section {
+                            ForEach(RemoteButton.allCases) { button in
+                                ButtonMappingRow(
+                                    button: button,
+                                    action: binding(for: button),
+                                    isPressed: controller.pressedButtons.contains(button),
+                                    isHovered: hovered == button
+                                )
+                                .id(button)
+                                .onHover { inside in
+                                    // Moving between rows can report the new row before the old one leaves.
+                                    if inside {
+                                        hoverFromDiagram = false
+                                        hovered = button
+                                    } else if hovered == button {
+                                        hovered = nil
+                                    }
+                                }
+                            }
+                        } footer: {
+                            HStack {
+                                Text("Point at a button on the picture or a row in the list to match them up. Pressing a button on the remote highlights both.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Reset \(mode.shortName) Mode to Defaults") { settings.resetMapping(for: mode) }
                             }
                         }
-                    } footer: {
-                        HStack {
-                            Text("Point at a row to find its button on the remote. Press a button on the remote to highlight its row.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Reset \(mode.shortName) Mode to Defaults") { settings.resetMapping(for: mode) }
-                        }
+                    }
+                    .formStyle(.grouped)
+                    // Let the window background show through so the remote column and the list read as one surface.
+                    .scrollContentBackground(.hidden)
+                    .onChange(of: hovered) { _, button in
+                        guard hoverFromDiagram, let button else { return }
+                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(button, anchor: .center) }
                     }
                 }
-                .formStyle(.grouped)
-                // Let the window background show through so the remote column and the list read as one surface.
-                .scrollContentBackground(.hidden)
             }
         }
         .onAppear { mode = settings.mode }
@@ -74,10 +96,11 @@ private struct RemotePreview: View {
     let pressed: Set<RemoteButton>
     let hovered: RemoteButton?
     let action: RemoteAction?
+    let onHover: (RemoteButton, Bool) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            RemoteDiagramView(pressed: pressed, touch: nil, highlighted: hovered)
+            RemoteDiagramView(pressed: pressed, touch: nil, highlighted: hovered, onHover: onHover)
                 .frame(width: 104, height: 312)
                 .animation(.easeOut(duration: 0.12), value: hovered)
             VStack(spacing: 3) {
@@ -85,7 +108,7 @@ private struct RemotePreview: View {
                     Text(hovered.displayName).font(.callout.weight(.semibold))
                     Text(action.displayName).font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Text("Point at a row to find its button")
+                    Text("Point at a button or a row")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

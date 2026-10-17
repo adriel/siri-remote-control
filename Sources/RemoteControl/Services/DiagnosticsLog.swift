@@ -40,10 +40,13 @@ final class DiagnosticsLog: ObservableObject {
     private let logger = Logger(subsystem: "com.runaroundhome.RemoteControl", category: "diagnostics")
 
     @Published private(set) var entries: [Entry] = []
+    /// Off for snapshot renders, so their sample entries don't land in the unified log.
+    var mirrorsToSystemLog = true
 
     func add(_ level: Level, _ category: Category, _ message: String) {
         entries.append(Entry(date: Date(), level: level, category: category, message: message))
         if entries.count > Self.maxEntries { entries.removeFirst(entries.count - Self.maxEntries) }
+        guard mirrorsToSystemLog else { return }
         switch level {
         case .error: logger.error("[\(category.rawValue, privacy: .public)] \(message, privacy: .public)")
         case .warning: logger.warning("[\(category.rawValue, privacy: .public)] \(message, privacy: .public)")

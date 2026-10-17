@@ -32,10 +32,7 @@ final class StatusItemController: NSObject {
     private func updateIcon() {
         guard let button = statusItem.button else { return }
         let connected = !controller.hid.devices.isEmpty
-        let symbol = settings.enabled ? settings.mode.symbolName : "appletvremote.gen4"
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Remote Control")
-        image?.isTemplate = true
-        button.image = image
+        button.image = MenuBarIcon.image(trackpad: settings.enabled && settings.mode == .trackpad)
         button.appearsDisabled = !settings.enabled || !connected
         var tip = "Remote Control: " + (settings.enabled ? settings.mode.displayName : "Off")
         tip += connected ? "" : " (remote not connected)"

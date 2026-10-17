@@ -34,6 +34,7 @@ final class RemoteController: ObservableObject {
     /// Last finger position and when it was seen, so a click right as the finger lands still finds a region.
     private var lastFinger: (point: CGPoint, time: TimeInterval)?
     private var touchFrameCount = 0
+    private var touchStartTime: TimeInterval = 0
     private var warnedNoAccessibilityThisTouch = false
     private var permissionTimer: Timer?
     /// Per-touch totals for the Diagnostics summary logged at finger-up.
@@ -272,6 +273,7 @@ final class RemoteController: ObservableObject {
         if let point {
             if touchPoint == nil {
                 touchFrameCount = 0
+                touchStartTime = time
                 warnedNoAccessibilityThisTouch = false
                 if trackpad { log.add(.info, .touch, String(format: "Finger down at (%.2f, %.2f)", point.x, point.y)) }
             }
@@ -286,7 +288,14 @@ final class RemoteController: ObservableObject {
             if recognizer.phase != .idle { endGesture() }
             return
         }
+        let phaseBefore = recognizer.phase
         handleGesture(recognizer.process(samples, at: time), at: time)
+        if phaseBefore == .pending, recognizer.phase == .moving {
+            log.add(.info, .touch, String(
+                format: "Finger moved after %.2f s, before the %.2f s hold, so this touch moves the pointer. Rest still a moment longer to scroll.",
+                time - touchStartTime, recognizer.configuration.holdDuration
+            ))
+        }
         updateHoldTimer()
     }
 

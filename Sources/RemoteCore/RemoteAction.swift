@@ -5,7 +5,7 @@ public enum ActionKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case none
     case volumeUp, volumeDown, volumeUpFine, volumeDownFine, mute
     case playPause, nextTrack, previousTrack, fastForward, rewind
-    case brightnessUp, brightnessDown
+    case brightnessUp, brightnessDown, brightnessUpFine, brightnessDownFine
     case keyboardShortcut
     case leftClick, rightClick, middleClick
     case toggleMode, switchToRemoteMode, switchToTrackpadMode
@@ -28,6 +28,8 @@ public enum ActionKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .rewind: "Rewind"
         case .brightnessUp: "Brightness Up"
         case .brightnessDown: "Brightness Down"
+        case .brightnessUpFine: "Brightness Up (Fine)"
+        case .brightnessDownFine: "Brightness Down (Fine)"
         case .keyboardShortcut: "Keyboard Key…"
         case .leftClick: "Left Click"
         case .rightClick: "Right Click"
@@ -64,14 +66,14 @@ public enum ActionKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .keyboardShortcut: .keyboard
         case .leftClick, .rightClick, .middleClick: .mouse
         case .toggleMode, .switchToRemoteMode, .switchToTrackpadMode: .mode
-        case .brightnessUp, .brightnessDown, .sleepDisplay, .lockScreen, .missionControl: .system
+        case .brightnessUp, .brightnessDown, .brightnessUpFine, .brightnessDownFine, .sleepDisplay, .lockScreen, .missionControl: .system
         }
     }
 
     /// Actions that auto-repeat while the button is held, like a keyboard key.
     public var repeatsWhileHeld: Bool {
         switch self {
-        case .volumeUp, .volumeDown, .volumeUpFine, .volumeDownFine, .brightnessUp, .brightnessDown, .keyboardShortcut: true
+        case .volumeUp, .volumeDown, .volumeUpFine, .volumeDownFine, .brightnessUp, .brightnessDown, .brightnessUpFine, .brightnessDownFine, .keyboardShortcut: true
         default: false
         }
     }

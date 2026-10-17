@@ -8,6 +8,8 @@ struct RemoteDiagramView: View {
     let touch: CGPoint?
     /// A button to point out (e.g. the mapping row under the pointer), drawn softer than a real press.
     var highlighted: RemoteButton?
+    /// When set, each button reports the pointer entering (true) and leaving (false) it.
+    var onHover: ((RemoteButton, Bool) -> Void)?
 
     private func isLit(_ button: RemoteButton) -> Bool { pressed.contains(button) || highlighted == button }
 
@@ -39,6 +41,10 @@ struct RemoteDiagramView: View {
                 Capsule()
                     .fill(fill(.siri, otherwise: Color(white: 0.75)))
                     .frame(width: w * (isLit(.siri) ? 0.05 : 0.035), height: h * 0.1)
+                    // The side button is thin; give it a wider hover target.
+                    .frame(width: w * 0.12, height: h * 0.12)
+                    .contentShape(Rectangle())
+                    .remoteHover(.siri, onHover)
                     .position(x: w - w * 0.01, y: padCenter.y - pad * 0.12)
 
                 // Microphone slot and power.
@@ -64,15 +70,18 @@ struct RemoteDiagramView: View {
         ZStack {
             Circle().fill(Color(white: 0.1))
             ForEach([RemoteButton.up, .right, .down, .left], id: \.self) { button in
-                if isLit(button) {
-                    RingSegment(index: [.up: 0, .right: 1, .down: 2, .left: 3][button]!)
-                        .fill(Color.accentColor.opacity(pressed.contains(button) ? 0.85 : 0.5))
-                }
+                let segment = RingSegment(index: [.up: 0, .right: 1, .down: 2, .left: 3][button]!)
+                segment
+                    .fill(isLit(button) ? Color.accentColor.opacity(pressed.contains(button) ? 0.85 : 0.5) : Color.clear)
+                    .contentShape(segment)
+                    .remoteHover(button, onHover)
             }
             Circle()
                 .fill(fill(.select, otherwise: Color(white: 0.06)))
                 .overlay(Circle().stroke(Color.white.opacity(0.08)))
                 .frame(width: d * 0.56, height: d * 0.56)
+                .contentShape(Circle())
+                .remoteHover(.select, onHover)
             ForEach(0..<4, id: \.self) { i in
                 Circle().fill(Color.white.opacity(0.5)).frame(width: 2.5, height: 2.5)
                     .offset(y: -d * 0.43)
@@ -84,6 +93,7 @@ struct RemoteDiagramView: View {
                     .frame(width: d * 0.12, height: d * 0.12)
                     .shadow(color: .accentColor, radius: 4)
                     .position(x: touch.x * d, y: (1 - touch.y) * d)
+                    .allowsHitTesting(false)
             }
         }
         .frame(width: d, height: d)
@@ -99,6 +109,8 @@ struct RemoteDiagramView: View {
                 .foregroundStyle(ring && !on ? Color.black.opacity(0.75) : .white)
         }
         .frame(width: diameter, height: diameter)
+        .contentShape(Circle())
+        .remoteHover(button, onHover)
     }
 
     private func volumeRocker(width: CGFloat, height: CGFloat) -> some View {
@@ -106,7 +118,11 @@ struct RemoteDiagramView: View {
             Capsule().fill(Color(white: 0.08))
             VStack(spacing: 0) {
                 Rectangle().fill(fill(.volumeUp, otherwise: .clear))
+                    .contentShape(Rectangle())
+                    .remoteHover(.volumeUp, onHover)
                 Rectangle().fill(fill(.volumeDown, otherwise: .clear))
+                    .contentShape(Rectangle())
+                    .remoteHover(.volumeDown, onHover)
             }
             .clipShape(Capsule())
             VStack {
@@ -117,8 +133,21 @@ struct RemoteDiagramView: View {
             .font(.system(size: width * 0.36, weight: .medium))
             .foregroundStyle(.white)
             .padding(.vertical, height * 0.12)
+            .allowsHitTesting(false)
         }
         .frame(width: width, height: height)
+    }
+}
+
+private extension View {
+    /// Reports hover over one remote button, only when a handler is supplied.
+    @ViewBuilder
+    func remoteHover(_ button: RemoteButton, _ handler: ((RemoteButton, Bool) -> Void)?) -> some View {
+        if let handler {
+            onHover { handler(button, $0) }
+        } else {
+            self
+        }
     }
 }
 

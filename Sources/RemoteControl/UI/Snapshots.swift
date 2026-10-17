@@ -13,6 +13,7 @@ enum Snapshots {
         let selection = SettingsSelection()
 
         let log = DiagnosticsLog.shared
+        log.mirrorsToSystemLog = false
         log.add(.info, .system, "Permissions: Accessibility Granted, Input Monitoring Granted")
         log.add(.success, .device, "Siri Remote (2nd gen or later) connected (58:0a:d4:a6:4d:ee), exclusive access")
         log.add(.success, .touch, "Touch surface attached")
@@ -31,6 +32,24 @@ enum Snapshots {
                        size: SettingsWindowController.minimumSize, to: dir.appendingPathComponent("tab-diagnostics-min.png"))
             }
         }
+        // Menu bar icons, enlarged, on light and dark bars.
+        render(HStack(spacing: 0) {
+            ForEach([false, true], id: \.self) { dark in
+                HStack(spacing: 28) {
+                    ForEach([false, true], id: \.self) { trackpad in
+                        Image(nsImage: MenuBarIcon.image(trackpad: trackpad))
+                            .renderingMode(.template).resizable().interpolation(.high)
+                            .frame(width: 90, height: 90)
+                            .foregroundStyle(dark ? Color.white : Color.black)
+                    }
+                    Image(nsImage: MenuBarIcon.image(trackpad: false)).renderingMode(.template)
+                        .foregroundStyle(dark ? Color.white : Color.black)
+                }
+                .padding(24)
+                .background(dark ? Color(white: 0.18) : Color(white: 0.93))
+            }
+        }, size: NSSize(width: 640, height: 140), to: dir.appendingPathComponent("menubar-icons.png"))
+
         // Buttons tab with the pointer over the TV row.
         render(ButtonsTab(initialHover: .tv).environmentObject(controller).environmentObject(controller.settings).padding(.top, 8),
                size: SettingsWindowController.defaultSize, to: dir.appendingPathComponent("buttons-hover-tv.png"))

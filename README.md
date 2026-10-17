@@ -13,9 +13,9 @@ A small macOS menu bar app that turns the Siri Remote (2nd generation and later,
 | Clickpad centre | Play / pause |
 | Back | ← Left arrow key |
 | TV / Home | → Right arrow key |
-| Play/Pause | Play / pause |
-| Volume + / − | Volume up / down |
-| Mute | Mute |
+| Play/Pause | Brightness up, quarter step (⇧⌥ brightness) |
+| Volume + / − | Volume up / down, quarter step (⇧⌥ volume) |
+| Mute | Brightness down, quarter step |
 | Power | Sleep display |
 | Siri (side button) | Switch between remote and trackpad mode |
 
