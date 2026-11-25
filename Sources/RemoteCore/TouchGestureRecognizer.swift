@@ -31,9 +31,13 @@ public enum GestureOutput: Equatable, Sendable {
 /// The pointer moves from the first frame. Meanwhile a touch starts out *pending*: if the finger settles on
 /// the clickpad's outer ring and stays within `holdTolerance` of that point until `holdDuration`, scrolling
 /// arms and the pointer stops. Moving further away first, or settling in the centre circle, makes it a plain
-/// pointer move. Once armed, scrolling follows how much
-/// the finger's direction of travel turns. A full circle is ±2π however big it is and wherever it is drawn
-/// on the surface, which is how click-wheel scrolling works.
+/// pointer move. Once armed, scrolling follows how much the finger's path turns. A full circle is ±2π however
+/// big it is and wherever it is drawn on the surface, which is how click-wheel scrolling works.
+///
+/// The turn is measured as the path's curvature over the last `curvatureWindow` of travel, multiplied by how
+/// far the finger moved along the path that frame. A hand-drawn circle wobbles, bending one way then the other
+/// along the way; measuring the turn frame by frame made those wobbles scroll the page back and forth, which
+/// was most visible when circling slowly. Averaged curvature keeps its sign, and distance moved is steady.
 public final class TouchGestureRecognizer {
     public enum Phase: String, Sendable {
         case idle, pending, moving, scrolling
@@ -48,9 +52,17 @@ public final class TouchGestureRecognizer {
         /// A hold only counts when the finger settles at least this far from the middle of the surface
         /// (out on the ring). Resting in the centre never scrolls, so slow pointing there isn't interrupted.
         public var holdMinRadius: Double = SiriRemoteHID.clickpadCentreRadius
-        /// Minimum path segment used to measure direction. Filters sensor noise.
+        /// Path is sampled every this far while scrolling to measure how it bends.
         public var scrollSegment: Double = 0.012
-        /// Direction changes larger than this between segments are treated as noise.
+        /// Curvature (and so the scroll direction) is averaged over this much of the most recent path.
+        public var curvatureWindow: Double = 0.15
+        /// Direction of travel is measured across at least this much of the recent path. Over a single short
+        /// segment sensor noise tilts the direction enough to make the page jump back and forth.
+        public var scrollChord: Double = 0.036
+        /// While scrolling, each frame moves the tracked point this fraction of the way to the finger
+        /// (a low-pass filter), so sensor jitter doesn't show up as the path turning back and forth.
+        public var scrollPositionSmoothing: Double = 0.45
+        /// Direction changes larger than this between samples are treated as noise.
         public var maxTurnPerSegment: Double = 1.7
         /// Smallest movement worth reporting; smaller deltas accumulate.
         public var moveDeadband: Double = 0.0008
@@ -67,7 +79,15 @@ public final class TouchGestureRecognizer {
     /// Where the finger settled; a hold must stay near it.
     private var holdAnchor = Point()
     private var scrollAnchor = Point()
-    private var lastSegment: Point?
+    /// Low-pass filtered finger position while scrolling.
+    private var scrollPoint = Point()
+    /// Recent smoothed path samples, oldest first, spaced at least `scrollSegment` apart.
+    private var trail: [Point] = []
+    private var lastChord: Point?
+    /// Recent (turn, path length) pairs whose lengths add up to about `curvatureWindow`, oldest first.
+    private var bends: [(turn: Double, length: Double)] = []
+    private var bendTurn = 0.0
+    private var bendLength = 0.0
 
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
@@ -148,7 +168,9 @@ public final class TouchGestureRecognizer {
     private func end() -> [GestureOutput] {
         let wasScrolling = phase == .scrolling
         trackedID = nil
-        lastSegment = nil
+        trail = []
+        lastChord = nil
+        clearBends()
         phase = .idle
         return [.touchEnded(wasScrolling: wasScrolling)]
     }
@@ -167,23 +189,57 @@ public final class TouchGestureRecognizer {
     private func armScroll(at point: Point, into out: inout [GestureOutput]) {
         phase = .scrolling
         scrollAnchor = point
-        lastSegment = nil
+        scrollPoint = point
+        trail = [point]
+        lastChord = nil
+        clearBends()
         out.append(.scrollArmed)
     }
 
-    private func scrollStep(to p: Point) -> [GestureOutput] {
-        let segment = p - scrollAnchor
-        guard segment.length >= configuration.scrollSegment else { return [] }
-        defer {
-            lastSegment = segment
-            scrollAnchor = p
+    private func scrollStep(to raw: Point) -> [GestureOutput] {
+        let a = min(max(configuration.scrollPositionSmoothing, 0.05), 1)
+        let previous = scrollPoint
+        scrollPoint = scrollPoint + (raw - scrollPoint) * a
+        let p = scrollPoint
+        samplePath(at: p)
+
+        guard let chord = lastChord, bendLength > 0 else { return [] }
+        // Progress along the direction of travel. Sideways wobble and sensor jitter mostly cancel out.
+        let along = (p - previous).dot(chord) / chord.length
+        let radians = bendTurn / bendLength * along
+        return radians == 0 ? [] : [.scroll(radians: radians)]
+    }
+
+    /// Adds a sample every `scrollSegment` of travel and records how much the path turned since the last one.
+    private func samplePath(at p: Point) {
+        let length = p.distance(to: scrollAnchor)
+        guard length >= configuration.scrollSegment else { return }
+        scrollAnchor = p
+        trail.append(p)
+        // Direction of travel: from the newest earlier sample at least a chord away. Older samples aren't needed.
+        guard let tailIndex = trail.indices.dropLast().last(where: { p.distance(to: trail[$0]) >= configuration.scrollChord }) else {
+            return
         }
-        guard let previous = lastSegment else { return [] }
-        let cross = previous.x * segment.y - previous.y * segment.x
-        let dot = previous.x * segment.x + previous.y * segment.y
-        let turn = atan2(cross, dot)
-        guard abs(turn) <= configuration.maxTurnPerSegment else { return [] }
-        return [.scroll(radians: turn)]
+        let chord = p - trail[tailIndex]
+        trail.removeFirst(tailIndex)
+        defer { lastChord = chord }
+        guard let previous = lastChord else { return }
+        let turn = atan2(previous.cross(chord), previous.dot(chord))
+        guard abs(turn) <= configuration.maxTurnPerSegment else { return }
+        bends.append((turn, length))
+        bendTurn += turn
+        bendLength += length
+        while bends.count > 1, bendLength - bends[0].length >= configuration.curvatureWindow {
+            let old = bends.removeFirst()
+            bendTurn -= old.turn
+            bendLength -= old.length
+        }
+    }
+
+    private func clearBends() {
+        bends = []
+        bendTurn = 0
+        bendLength = 0
     }
 }
 
@@ -202,6 +258,10 @@ private struct Point {
     }
 
     var length: Double { (x * x + y * y).squareRoot() }
+    func dot(_ o: Point) -> Double { x * o.x + y * o.y }
+    func cross(_ o: Point) -> Double { x * o.y - y * o.x }
     func distance(to other: Point) -> Double { (self - other).length }
     static func - (a: Point, b: Point) -> Point { Point(x: a.x - b.x, y: a.y - b.y) }
+    static func + (a: Point, b: Point) -> Point { Point(x: a.x + b.x, y: a.y + b.y) }
+    static func * (a: Point, k: Double) -> Point { Point(x: a.x * k, y: a.y * k) }
 }

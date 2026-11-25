@@ -42,6 +42,13 @@ final class RemoteController: ObservableObject {
     /// Per-touch totals for the Diagnostics summary logged at finger-up.
     private var touchMoved = CGVector.zero
     private var touchScrolled = 0.0
+    /// Evens out bursty circle-scroll output; drained by `scrollTimer` at display rate.
+    private var scrollSmoother = ScrollSmoother()
+    private var scrollTimer: Timer?
+    private var lastScrollTick: TimeInterval = 0
+    /// True between hold-detected and finger-up; once false the timer drains what's left and ends the gesture.
+    private var scrollFingerDown = false
+    private let trace = ScrollTrace.shared
 
     /// Base cursor travel, in points, for a swipe across the full width of the surface.
     private static let pointsPerSurfaceWidth = 900.0
@@ -274,6 +281,8 @@ final class RemoteController: ObservableObject {
         clickpadHeld = nil
         synth.releaseAllMouseButtons()
         endGesture()
+        // Disabling or switching mode stops scrolling now rather than letting it glide out.
+        finishScroll(flush: false)
     }
 
     // MARK: Touch
@@ -301,6 +310,9 @@ final class RemoteController: ObservableObject {
             return
         }
         let phaseBefore = recognizer.phase
+        if let point, phaseBefore == .pending || phaseBefore == .scrolling {
+            trace.frame(time, x: point.x, y: point.y)
+        }
         handleGesture(recognizer.process(samples, at: time), at: time)
         if phaseBefore == .pending, recognizer.phase == .moving, let point, !SiriRemoteHID.isOnClickpadRing(x: point.x, y: point.y) {
             log.add(.info, .touch, "Finger is in the centre of the clickpad, so this touch moves the pointer. Rest on the outer ring to scroll.")
@@ -337,6 +349,7 @@ final class RemoteController: ObservableObject {
         for output in outputs {
             switch output {
             case .touchBegan:
+                finishScroll(flush: true)
                 lastMoveTime = nil
                 smoothedSpeed = nil
                 touchMoved = .zero
@@ -365,7 +378,10 @@ final class RemoteController: ObservableObject {
                 touchMoved.dy -= dy * gain
 
             case .scrollArmed:
-                synth.resetScroll()
+                finishScroll(flush: true)
+                synth.beginScrollGesture()
+                scrollFingerDown = true
+                trace.marker(time, "armed")
                 log.add(.info, .touch, "Hold detected: circle to scroll")
                 if settings.showScrollIndicator { HUD.shared.showScrollIndicator(at: synth.cursorLocation) }
 
@@ -373,12 +389,18 @@ final class RemoteController: ObservableObject {
                 // Clockwise (negative) scrolls down the page, like a click wheel.
                 var pixels = radians / (2 * .pi) * Self.pixelsPerRevolution * settings.scrollSpeed
                 if settings.reverseScroll { pixels = -pixels }
-                synth.scroll(pixels: pixels)
+                scrollSmoother.add(pixels)
+                trace.turn(time, radians: radians, pixels: pixels)
                 touchScrolled += pixels
+                startScrollTimer()
 
             case let .touchEnded(wasScrolling):
                 lastMoveTime = nil
                 if wasScrolling {
+                    // Let what's queued glide out, then close the gesture.
+                    scrollFingerDown = false
+                    trace.marker(time, "fingerUp")
+                    if scrollTimer == nil { finishScroll(flush: true) }
                     let direction = touchScrolled < 0 ? "down the page" : "up the page"
                     log.add(.info, .touch, String(format: "Scrolled %.0f px %@", abs(touchScrolled), direction))
                 } else if touchMoved != .zero {
@@ -388,6 +410,47 @@ final class RemoteController: ObservableObject {
             }
         }
         gesturePhase = recognizer.phase
+    }
+
+    private func startScrollTimer() {
+        guard scrollTimer == nil else { return }
+        lastScrollTick = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrollTick() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        scrollTimer = timer
+    }
+
+    private func scrollTick() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt = min(max(now - lastScrollTick, 0), 0.05)
+        lastScrollTick = now
+        let pixels = scrollSmoother.step(dt: dt)
+        synth.scroll(pixels: pixels)
+        trace.post(now, pixels: pixels, pending: scrollSmoother.pending)
+        guard scrollSmoother.isSettled else { return }
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        if !scrollFingerDown {
+            trace.marker(now, "ended")
+            synth.endScrollGesture()
+        }
+    }
+
+    /// Stops the output timer and closes the scroll gesture, posting anything still queued if `flush`.
+    private func finishScroll(flush: Bool) {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        let rest = scrollSmoother.flush()
+        let now = ProcessInfo.processInfo.systemUptime
+        if flush, rest != 0 {
+            synth.scroll(pixels: rest)
+            trace.post(now, pixels: rest, pending: 0)
+        }
+        scrollFingerDown = false
+        if synth.isScrollGestureActive { trace.marker(now, "ended") }
+        synth.endScrollGesture()
     }
 
     private func endGesture() {

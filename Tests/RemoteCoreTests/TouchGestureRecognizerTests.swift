@@ -142,3 +142,130 @@ final class TouchGestureRecognizerTests: XCTestCase {
         XCTAssertEqual(r.phase, .pending)
     }
 }
+
+final class ScrollSmootherTests: XCTestCase {
+    func testReleasesEverythingEventually() {
+        var s = ScrollSmoother()
+        s.add(100)
+        var total = 0.0
+        for _ in 0..<120 { total += s.step(dt: 1.0 / 120) }
+        XCTAssertEqual(total, 100, accuracy: 1e-9)
+        XCTAssertTrue(s.isSettled)
+    }
+
+    func testSpreadsABurstOverSeveralFrames() {
+        var s = ScrollSmoother()
+        s.add(60)
+        let first = s.step(dt: 1.0 / 120)
+        XCTAssertGreaterThan(first, 0)
+        XCTAssertLessThan(first, 15)  // not dumped in one frame
+    }
+
+    func testEvenStreamFromUnevenBursts() {
+        // Chunks arriving every 3rd frame come out as a near-constant per-frame rate once warmed up.
+        var s = ScrollSmoother()
+        var outputs: [Double] = []
+        for frame in 0..<240 {
+            if frame % 3 == 0 { s.add(6) }
+            outputs.append(s.step(dt: 1.0 / 120))
+        }
+        let steady = outputs[120...]
+        XCTAssertLessThan(steady.max()! - steady.min()!, 1.0)
+        XCTAssertEqual(steady.reduce(0, +) / Double(steady.count), 2, accuracy: 0.1)
+    }
+
+    func testFlushReturnsTheRest() {
+        var s = ScrollSmoother()
+        s.add(-40)
+        let first = s.step(dt: 1.0 / 120)
+        XCTAssertEqual(first + s.flush(), -40, accuracy: 1e-9)
+        XCTAssertTrue(s.isSettled)
+    }
+}
+
+final class TouchGestureScrollSmoothingTests: XCTestCase {
+    func testJitteryCircleScrollsSteadily() {
+        // A clockwise circle with sensor noise on every frame should keep scrolling one way: the running
+        // total may only back up by a small amount at any point.
+        let r = TouchGestureRecognizer()
+        _ = r.process([TouchSample(id: 1, x: 0.8, y: 0.5)], at: 0)
+        _ = r.tick(at: 0.5)
+        var rng = SeededGenerator(seed: 42)
+        var total = 0.0
+        var lowest = 0.0
+        var worstBacktrack = 0.0
+        for i in 1...240 {
+            let a = -Double(i) / 120 * 2 * .pi
+            let nx = Double.random(in: -0.004...0.004, using: &rng)
+            let ny = Double.random(in: -0.004...0.004, using: &rng)
+            let out = r.process([TouchSample(id: 1, x: 0.5 + 0.3 * cos(a) + nx, y: 0.5 + 0.3 * sin(a) + ny)], at: 0.5 + Double(i) * 0.01)
+            for case let .scroll(rad) in out {
+                total += rad
+                lowest = min(lowest, total)
+                worstBacktrack = max(worstBacktrack, total - lowest)
+            }
+        }
+        XCTAssertLessThan(total, -2 * .pi * 1.7)
+        XCTAssertLessThan(worstBacktrack, 0.15)  // ~24 px at default speed, before output smoothing
+    }
+}
+
+extension TouchGestureScrollSmoothingTests {
+    /// Feeds a path after a hold at its first point; returns each frame's scroll radians.
+    private func scrolls(along path: [(Double, Double)]) -> [Double] {
+        let r = TouchGestureRecognizer()
+        _ = r.process([TouchSample(id: 1, x: path[0].0, y: path[0].1)], at: 0)
+        _ = r.tick(at: 0.5)
+        var out: [Double] = []
+        for (i, p) in path.dropFirst().enumerated() {
+            var frame = 0.0
+            for case let .scroll(rad) in r.process([TouchSample(id: 1, x: p.0, y: p.1)], at: 0.5 + Double(i) * 0.015) { frame += rad }
+            out.append(frame)
+        }
+        return out
+    }
+
+    func testSlowWobblyCircleDoesNotScrollBackwards() {
+        // A slow hand-drawn circle: the radius wobbles in and out, so the path bends back and forth
+        // along the way (as in recorded traces), but the finger keeps going clockwise.
+        let frames = 1400
+        let path = (0...frames).map { i -> (Double, Double) in
+            let a = -Double(i) / Double(frames) * 4 * .pi  // two turns, about 0.27 surface widths a second
+            let radius = 0.3 + 0.008 * sin(a * 7)  // bends the wrong way briefly in each lobe
+            return (0.5 + radius * cos(a), 0.5 + radius * sin(a))
+        }
+        let out = scrolls(along: path)
+        let total = out.reduce(0, +)
+        let backwards = out.filter { $0 > 0 }.reduce(0, +)
+        XCTAssertLessThan(total, -2 * .pi * 1.8)
+        XCTAssertGreaterThan(total, -2 * .pi * 2.1)
+        XCTAssertLessThan(backwards, abs(total) * 0.01)
+    }
+
+    func testReversingDirectionReversesScrolling() {
+        // One clockwise turn, then back counter-clockwise: scrolling must follow within a short stretch.
+        let half = 300
+        var path: [(Double, Double)] = []
+        for i in 0...half { let a = -Double(i) / Double(half) * 2 * .pi; path.append((0.5 + 0.3 * cos(a), 0.5 + 0.3 * sin(a))) }
+        for i in 1...half { let a = -2 * .pi + Double(i) / Double(half) * 2 * .pi; path.append((0.5 + 0.3 * cos(a), 0.5 + 0.3 * sin(a))) }
+        let out = scrolls(along: path)
+        XCTAssertLessThan(out[..<half].reduce(0, +), -2 * .pi * 0.85)
+        // Within a quarter turn (~0.47 surface) of reversing, scrolling has flipped and stays flipped.
+        let settled = out[(half + half / 4)...]
+        XCTAssertTrue(settled.allSatisfy { $0 >= 0 })
+        XCTAssertGreaterThan(out[half...].reduce(0, +), 2 * .pi * 0.6)
+    }
+}
+
+/// Deterministic generator so the noise test can't flake.
+private struct SeededGenerator: RandomNumberGenerator {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}

@@ -31,6 +31,9 @@ final class EventSynthesizer {
     private var clickCount = 0
     private var virtualCursor: CGPoint?
     private var scrollRemainder = 0.0
+    private enum ScrollGestureState { case idle, armed, inProgress }
+    private var scrollGesture = ScrollGestureState.idle
+    var isScrollGestureActive: Bool { scrollGesture != .idle }
 
     var anyMouseButtonDown: Bool { leftDown || rightDown || middleDown }
 
@@ -143,16 +146,47 @@ final class EventSynthesizer {
     }
 
     /// Vertical pixel scroll. Positive scrolls up (towards the top of the document).
+    ///
+    /// Between `beginScrollGesture()` and `endScrollGesture()` events carry trackpad scroll phases, so apps
+    /// scroll them 1:1 like a trackpad instead of treating each one as a mouse-wheel notch (which many apps
+    /// animate or accelerate, making a steady stream look jumpy).
     func scroll(pixels: Double) {
         scrollRemainder += pixels
         let whole = scrollRemainder.rounded(.towardZero)
         guard whole != 0 else { return }
         scrollRemainder -= whole
-        let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 1, wheel1: Int32(whole), wheel2: 0, wheel3: 0)
-        event?.post(tap: .cghidEventTap)
+        let phase: CGScrollPhase?
+        switch scrollGesture {
+        case .idle: phase = nil
+        case .armed: phase = .began
+        case .inProgress: phase = .changed
+        }
+        postScroll(Int32(whole), phase: phase)
+        if scrollGesture == .armed { scrollGesture = .inProgress }
     }
 
-    func resetScroll() { scrollRemainder = 0 }
+    /// The next scroll events belong to one continuous, trackpad-like gesture.
+    func beginScrollGesture() {
+        if scrollGesture == .inProgress { postScroll(0, phase: .ended) }
+        scrollRemainder = 0
+        scrollGesture = .armed
+    }
+
+    func endScrollGesture() {
+        if scrollGesture == .inProgress { postScroll(0, phase: .ended) }
+        scrollRemainder = 0
+        scrollGesture = .idle
+    }
+
+    private func postScroll(_ pixels: Int32, phase: CGScrollPhase?) {
+        guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else { return }
+        if let phase {
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+            event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 0)
+        }
+        event.post(tap: .cghidEventTap)
+    }
 
     private static func clampToDisplays(_ point: CGPoint, from current: CGPoint) -> CGPoint {
         var count: UInt32 = 0
