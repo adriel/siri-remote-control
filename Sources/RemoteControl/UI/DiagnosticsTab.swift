@@ -129,6 +129,7 @@ struct DiagnosticsTab: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var log: DiagnosticsLog
     @EnvironmentObject private var hid: HIDRemoteManager
+    @ObservedObject private var scrollTrace = ScrollTrace.shared
     @StateObject private var model = DiagnosticsModel()
 
     var body: some View {
@@ -219,6 +220,12 @@ struct DiagnosticsTab: View {
                             Toggle("Log raw input", isOn: $hid.rawLogging)
                                 .toggleStyle(.checkbox)
                                 .help("Logs every raw report from all of the remote's interfaces. Useful when a button does nothing at all.")
+                            Toggle("Trace scrolling", isOn: $scrollTrace.enabled)
+                                .toggleStyle(.checkbox)
+                                .help("Records every touch frame and scroll step while circle-scrolling to ~/Library/Logs/RemoteControl/scroll-trace.csv. Turning it on starts a new file.")
+                            if scrollTrace.enabled {
+                                Button("Show Trace") { scrollTrace.revealInFinder() }
+                            }
                             Button("Copy Report") { copyReport() }
                             Button("Clear") { log.clear() }
                         }
