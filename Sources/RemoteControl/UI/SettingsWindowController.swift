@@ -62,6 +62,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             .environmentObject(controller.battery)
             .environmentObject(controller.batteryHistory)
             .environmentObject(controller.pairing)
+            .environmentObject(controller.sleeper)
             .environmentObject(controller.log)
     }
 }

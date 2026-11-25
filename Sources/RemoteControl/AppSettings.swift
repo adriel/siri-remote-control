@@ -26,6 +26,21 @@ final class AppSettings: ObservableObject {
     /// Set once a low-battery alert was sent; cleared when the level climbs back above the threshold.
     @Published var batteryAlertSent: Bool { didSet { defaults.set(batteryAlertSent, forKey: "batteryAlertSent") } }
 
+    /// Drop the remote's Bluetooth link after it's been idle this long, to save its battery.
+    @Published var sleepWhenIdle: Bool { didSet { defaults.set(sleepWhenIdle, forKey: "sleepWhenIdle") } }
+    @Published var sleepIdleMinutes: Int { didSet { defaults.set(sleepIdleMinutes, forKey: "sleepIdleMinutes") } }
+    /// Drop the link as soon as the Mac wakes between `daytimeStartHour` and `daytimeEndHour`.
+    @Published var sleepOnDaytimeWake: Bool { didSet { defaults.set(sleepOnDaytimeWake, forKey: "sleepOnDaytimeWake") } }
+    @Published var daytimeStartHour: Int { didSet { defaults.set(daytimeStartHour, forKey: "daytimeStartHour") } }
+    @Published var daytimeEndHour: Int { didSet { defaults.set(daytimeEndHour, forKey: "daytimeEndHour") } }
+
+    var sleepPolicy: SleepPolicy {
+        SleepPolicy(
+            idleEnabled: sleepWhenIdle, idleInterval: TimeInterval(sleepIdleMinutes * 60),
+            dropOnDaytimeWake: sleepOnDaytimeWake, dayStartHour: daytimeStartHour, dayEndHour: daytimeEndHour
+        )
+    }
+
     /// Remotes seen on this Mac, keyed by Bluetooth address, so the Pairing tab can list sleeping ones.
     @Published var knownRemotes: [String: String] { didSet { defaults.set(knownRemotes, forKey: "knownRemotes") } }
 
@@ -44,6 +59,11 @@ final class AppSettings: ObservableObject {
             "batteryAlertsEnabled": true,
             "batteryThreshold": 20,
             "batteryAlertSent": false,
+            "sleepWhenIdle": true,
+            "sleepIdleMinutes": 60,
+            "sleepOnDaytimeWake": true,
+            "daytimeStartHour": 5,
+            "daytimeEndHour": 18,
         ])
         enabled = defaults.bool(forKey: "enabled")
         mode = RemoteMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .remote
@@ -58,6 +78,11 @@ final class AppSettings: ObservableObject {
         batteryAlertsEnabled = defaults.bool(forKey: "batteryAlertsEnabled")
         batteryThreshold = defaults.integer(forKey: "batteryThreshold")
         batteryAlertSent = defaults.bool(forKey: "batteryAlertSent")
+        sleepWhenIdle = defaults.bool(forKey: "sleepWhenIdle")
+        sleepIdleMinutes = max(defaults.integer(forKey: "sleepIdleMinutes"), 5)
+        sleepOnDaytimeWake = defaults.bool(forKey: "sleepOnDaytimeWake")
+        daytimeStartHour = defaults.integer(forKey: "daytimeStartHour")
+        daytimeEndHour = defaults.integer(forKey: "daytimeEndHour")
         knownRemotes = defaults.dictionary(forKey: "knownRemotes") as? [String: String] ?? [:]
         if let data = defaults.data(forKey: "mapping"),
            var saved = try? JSONDecoder().decode(ButtonMapping.self, from: data) {
