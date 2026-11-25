@@ -67,6 +67,8 @@ struct BatteryTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            RemoteSleepSections()
+
             BatteryHistorySections()
         }
         .formStyle(.grouped)

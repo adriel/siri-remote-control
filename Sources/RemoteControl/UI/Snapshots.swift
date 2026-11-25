@@ -9,7 +9,12 @@ enum Snapshots {
     static func run(outputDirectory: String) {
         let dir = URL(fileURLWithPath: outputDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let controller = RemoteController(batteryHistory: BatteryHistoryStore(fileURL: nil, history: sampleHistory(now: Date())))
+        let now = Date()
+        let sleep = sampleSleepLog(now: now)
+        let controller = RemoteController(
+            batteryHistory: BatteryHistoryStore(fileURL: nil, history: sampleHistory(now: now, sleep: sleep)),
+            sleepLog: sleep
+        )
         let selection = SettingsSelection()
 
         let log = DiagnosticsLog.shared
@@ -75,8 +80,23 @@ enum Snapshots {
         print("Snapshots written to \(dir.path)")
     }
 
+    /// The last week: the remote disconnected from about 7:00 to 18:00 each day, after an hour idle.
+    private static func sampleSleepLog(now: Date) -> SleepLog {
+        var log = SleepLog()
+        let calendar = Calendar.current
+        for daysAgo in (1...7).reversed() {
+            guard let day = calendar.date(byAdding: .day, value: -daysAgo, to: calendar.startOfDay(for: now)),
+                  let start = calendar.date(bySettingHour: 7, minute: 10 + daysAgo, second: 0, of: day),
+                  let end = calendar.date(bySettingHour: 18, minute: 20 + daysAgo * 3, second: 0, of: day) else { continue }
+            log.begin(at: start, reason: daysAgo % 3 == 0 ? "no button presses for 1 h" : "the Mac woke during the day", level: nil)
+            log.end(at: end, level: nil)
+        }
+        return log
+    }
+
     /// A month of plausible readings: slow drain, heavier use in the evenings, a charge, and a few days asleep.
-    private static func sampleHistory(now: Date) -> BatteryHistory {
+    /// No readings while `sleep` has the remote disconnected, like the real thing.
+    private static func sampleHistory(now: Date, sleep: SleepLog) -> BatteryHistory {
         var history = BatteryHistory()
         let start = now.addingTimeInterval(-31 * 86_400)
         var level = 62.0
@@ -84,7 +104,10 @@ enum Snapshots {
         while time < now {
             let day = Int(time.timeIntervalSince(start) / 86_400)
             let hour = Calendar.current.component(.hour, from: time)
-            if ![5, 6, 7, 19].contains(day) {
+            let asleep = sleep.periods.contains { time >= $0.start && time < ($0.end ?? now) }
+            if asleep {
+                level -= 0.004
+            } else if ![5, 6, 7, 19].contains(day) {
                 level -= (18...23).contains(hour) ? 0.15 : 0.02
                 if day == 17, hour == 9 { level = 100 }
                 history.record(level: Int(level.rounded()), at: time)

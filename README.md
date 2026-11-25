@@ -31,6 +31,7 @@ Also:
 
 - **Right-click the menu bar icon** (or ⌃-click) to turn the app on or off. A left-click opens the menu.
 - **Battery**: shows the remote's charge, sends a notification when it falls to your chosen level (default 20%), and keeps a history. Pick Past Week or Past Month to see a level chart (hover for exact readings), your average daily use with an estimate of how long the charge will last, and one section per day with % used, start and end level, charging, a 24-hour chart and the individual readings. A reading is saved whenever the level changes, and every 30 minutes otherwise. History lives in `~/Library/Application Support/com.runaroundhome.RemoteControl/battery-history.json` and is kept for 35 days.
+- **Sleep to save battery**: macOS keeps the remote connected all the time, so its radio never fully rests and it loses a few percent a day even when it's not being used. The app can drop the remote's Bluetooth link instead: after an hour with no button presses (the timer counts time the Mac was asleep), and straight away when the Mac wakes during the day (5:00 to 18:00 by default). Press any button to wake the remote. It reconnects in a second or two, and that first press may not do anything. Set it up in **Settings → Battery**, or pick **Disconnect Remote to Save Battery** from the menu. Under **Does sleeping help?** the Battery tab compares battery use while asleep with use while connected over the last two weeks, and lists recent sleeps. Each sleep is saved in `remote-sleep.json` next to the battery history and logged under Sleep in Diagnostics.
 - **Pairing**: lists remotes this Mac has seen, unpairs them, and walks you through pairing a new one.
 - **Diagnostics**: shows why a button might not be working. It covers permissions, apps holding the remote (such as Remote Buddy), Secure Input, other apps filtering events, and whether the remote is asleep. It has a live picture of the remote that lights up as you press, plus an event log of each press and what it did.
 
@@ -78,7 +79,7 @@ On first launch the app opens Diagnostics and asks for:
 - **Accessibility**: to send keys, clicks, pointer movement, scrolling and media keys.
 - **Input Monitoring**: to read the remote's buttons.
 - **Notifications**: for low-battery alerts.
-- **Bluetooth**: only when you use Find Remote or Unpair.
+- **Bluetooth**: for putting the remote to sleep, and when you use Find Remote or Unpair.
 
 ### Remote Buddy
 
@@ -89,7 +90,8 @@ Quit Remote Buddy while using this app; both try to grab the remote. Diagnostics
 - **Buttons**: the remote shows up as a Bluetooth LE HID device (vendor 0x004C, product 0x0314). Every button is a 1-bit field in one Consumer Control report. The app opens that interface with `IOHIDManager`, with exclusive access by default, so macOS's own handling doesn't also fire. That handling is the Music app opening on Play and double volume steps. The usage table is in `Sources/RemoteCore/SiriRemoteHID.swift`.
 - **Touch**: macOS turns the remote's digitizer into an `AppleMultitouchDevice`. The app reads finger positions through the private MultitouchSupport framework, loaded at runtime with `dlopen`. `TouchGestureRecognizer` turns frames into pointer moves and hold-then-circle scrolling. Scrolling follows how much the finger's direction of travel turns, so any size of circle anywhere on the pad works.
 - **Output**: `CGEvent` for keys, mouse and scroll, and `NSEvent` system-defined events for media keys (the same events as the keyboard's F7–F12 keys).
-- **Battery**: read from the accessory power sources macOS publishes, the same data as `pmset -g accps`.
+- **Battery**: read from the accessory power sources macOS publishes, the same data as `pmset -g accps`. macOS stops publishing it while the remote is disconnected, so there are no readings while it sleeps.
+- **Sleep**: there's no public API to disconnect a Bluetooth LE HID device the system owns. The app joins the system's connection with CoreBluetooth, then cancels it with two private options, `kCBCancelConnectOptionForce` and `kCBCancelConnectOptionDoNotAutoConnectBuiltInServices`. Without the second option macOS reconnects within a couple of seconds. With it, macOS also stops reconnecting when a button is pressed, so the app keeps a CoreBluetooth connect request open while the remote sleeps. A button press makes the remote advertise, the request completes, and the HID driver attaches again. The private pieces are looked up at runtime (`Sources/RemoteControl/Services/RemoteLink.swift`). If you quit the app while the remote is asleep, it reconnects the next time the app runs, or you can connect it from Bluetooth settings.
 
 ## Project layout
 

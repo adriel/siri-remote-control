@@ -23,9 +23,9 @@ final class StatusItemController: NSObject {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        Publishers.CombineLatest3(settings.$enabled, settings.$mode, controller.hid.$devices)
+        Publishers.CombineLatest4(settings.$enabled, settings.$mode, controller.hid.$devices, controller.sleeper.$state)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _, _ in self?.updateIcon() }
+            .sink { [weak self] _, _, _, _ in self?.updateIcon() }
             .store(in: &cancellables)
     }
 
@@ -35,7 +35,7 @@ final class StatusItemController: NSObject {
         button.image = MenuBarIcon.image(trackpad: settings.enabled && settings.mode == .trackpad)
         button.appearsDisabled = !settings.enabled || !connected
         var tip = "Remote Control: " + (settings.enabled ? settings.mode.displayName : "Off")
-        tip += connected ? "" : " (remote not connected)"
+        tip += connected ? "" : controller.sleeper.isAsleep ? " (remote asleep: press a button to wake it)" : " (remote not connected)"
         tip += "\nRight-click to turn \(settings.enabled ? "off" : "on")"
         button.toolTip = tip
     }
@@ -60,11 +60,15 @@ final class StatusItemController: NSObject {
         let menu = NSMenu()
 
         let remote = controller.hid.devices.first
-        var status = remote.map { "\($0.modelName): Connected" } ?? "Siri Remote: Not connected"
+        var status = remote.map { "\($0.modelName): Connected" }
+            ?? (controller.sleeper.isAsleep ? "Siri Remote: Asleep (press a button to wake)" : "Siri Remote: Not connected")
         if let level = controller.battery.reading?.level { status += " · \(level)%" }
         let statusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
         statusItem.isEnabled = false
         menu.addItem(statusItem)
+        if remote != nil, controller.sleeper.state == .connected {
+            menu.addItem(item("Disconnect Remote to Save Battery", #selector(sleepRemote)))
+        }
         menu.addItem(.separator())
 
         let enabled = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
@@ -104,6 +108,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func toggleEnabled() { controller.toggleEnabled() }
+    @objc private func sleepRemote() { controller.sleeper.sleepNow(reason: "disconnected from the menu") }
 
     @objc private func selectMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let mode = RemoteMode(rawValue: raw) else { return }

@@ -12,6 +12,7 @@ final class RemoteController: ObservableObject {
     let battery = BatteryMonitor()
     let batteryHistory: BatteryHistoryStore
     let pairing = BluetoothPairing()
+    let sleeper: RemoteSleeper
 
     /// Buttons currently held down on the remote (for the live diagram and mapping highlight).
     @Published private(set) var pressedButtons: Set<RemoteButton> = []
@@ -65,16 +66,26 @@ final class RemoteController: ObservableObject {
         return slowSpeedGain + (1 - slowSpeedGain) * t * t * (3 - 2 * t)
     }
 
-    init(batteryHistory: BatteryHistoryStore? = nil) {
+    /// Pass a history and sleep log for snapshots, which keep everything in memory.
+    init(batteryHistory: BatteryHistoryStore? = nil, sleepLog: SleepLog? = nil) {
         settings = .shared
         log = .shared
         self.batteryHistory = batteryHistory ?? BatteryHistoryStore()
+        let (hid, battery) = (hid, battery)
+        if let sleepLog {
+            sleeper = RemoteSleeper(settings: .shared, hid: hid, battery: battery, fileURL: nil, sleepLog: sleepLog)
+        } else {
+            sleeper = RemoteSleeper(settings: .shared, hid: hid, battery: battery)
+        }
     }
 
     func start() {
         hid.onButton = { [weak self] button, usage, pressed in self?.handleHIDButton(button, usage: usage, pressed: pressed) }
         hid.onDeviceConnected = { [weak self] remote in self?.remoteConnected(remote) }
-        hid.onDeviceDisconnected = { [weak self] _ in self?.releaseEverything() }
+        hid.onDeviceDisconnected = { [weak self] remote in
+            self?.releaseEverything()
+            self?.sleeper.remoteDisconnected(remote)
+        }
         touch.onFrame = { [weak self] samples, time in self?.handleTouch(samples, at: time) }
         touch.onButtonState = { [weak self] new, old in self?.handleClickpadState(new: new, old: old) }
         battery.onReading = { [weak self] reading in self?.evaluateBattery(reading) }
@@ -99,9 +110,11 @@ final class RemoteController: ObservableObject {
 
         battery.start()
         applyEnabled(settings.enabled)
+        sleeper.start()
     }
 
     func shutdown() {
+        sleeper.shutdown()
         releaseEverything()
         hid.stop()
         touch.stop()
@@ -198,6 +211,7 @@ final class RemoteController: ObservableObject {
     private func handleButton(_ button: RemoteButton, source: String, pressed: Bool) {
         let arrow = pressed ? "↓" : "↑"
         if pressed {
+            sleeper.noteActivity()
             guard !pressedButtons.contains(button) else { return }
             pressedButtons.insert(button)
             lastButtonEvent = "\(button.displayName) (\(source))"
@@ -300,6 +314,7 @@ final class RemoteController: ObservableObject {
             }
             touchFrameCount += 1
             lastFinger = (point, time)
+            if touchFrameCount == 1 { sleeper.noteActivity() }
         } else if let last = touchPoint, trackpad {
             log.add(.info, .touch, String(format: "Finger up at (%.2f, %.2f) after %d frames", last.x, last.y, touchFrameCount))
         }
@@ -466,6 +481,7 @@ final class RemoteController: ObservableObject {
     private func remoteConnected(_ remote: HIDRemoteManager.RemoteDevice) {
         if remote.address != "unknown" { settings.knownRemotes[remote.address] = remote.modelName }
         pairing.remoteDidConnect(name: remote.modelName)
+        sleeper.remoteConnected(remote)
         // The touch surface comes up alongside the button interface; make sure we're attached.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self, self.touch.attachedCount == 0 else { return }
@@ -476,6 +492,7 @@ final class RemoteController: ObservableObject {
 
     private func evaluateBattery(_ reading: BatteryMonitor.Reading) {
         batteryHistory.record(level: reading.level, at: reading.date)
+        sleeper.noteBattery(reading)
         let threshold = settings.batteryThreshold
         if reading.level <= threshold {
             guard settings.batteryAlertsEnabled, !settings.batteryAlertSent else { return }

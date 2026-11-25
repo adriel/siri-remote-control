@@ -25,6 +25,7 @@ final class DiagnosticsLog: ObservableObject {
         case system = "System"
         case battery = "Battery"
         case pairing = "Pairing"
+        case sleep = "Sleep"
     }
 
     struct Entry: Identifiable {
